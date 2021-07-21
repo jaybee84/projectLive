@@ -1,77 +1,116 @@
+has_auth_code <- function(params) {
+  # params is a list object containing the parsed URL parameters. Return TRUE if
+  # based on these parameters, it looks like auth code is present that we can
+  # use to get an access token. If not, it means we need to go through the OAuth
+  # flow.
+  return(!is.null(params$code))
+}
+
+oauth_client = yaml.load_file("config.yaml")
+
+client_id <- toString(oauth_client$client_id)
+client_secret <- oauth_client$client_secret
+if (is.null(client_id)) stop("config.yaml is missing client_id")
+if (is.null(client_secret)) stop("config.yaml is missing client_secret")
+
+app <- oauth_app("shinysynapse",
+                 key = client_id,
+                 secret = client_secret, 
+                 redirect_uri = APP_URL)
+
+# These are the user info details ('claims') requested from Synapse:
+claims=list(
+  family_name=NULL, 
+  given_name=NULL,
+  email=NULL,
+  email_verified=NULL,
+  userid=NULL,
+  orcid=NULL,
+  is_certified=NULL,
+  is_validated=NULL,
+  validated_given_name=NULL,
+  validated_family_name=NULL,
+  validated_location=NULL,
+  validated_email=NULL,
+  validated_company=NULL,
+  validated_at=NULL,
+  validated_orcid=NULL,
+  company=NULL
+)
+
+claimsParam<-toJSON(list(id_token = claims, userinfo = claims))
+api <- oauth_endpoint(
+  authorize=paste0("https://signin.synapse.org?claims=", claimsParam),
+  access="https://repo-prod.prod.sagebase.org/auth/v1/oauth2/token"
+)
+
+# The 'openid' scope is required by the protocol for retrieving user information.
+scope <- "openid view download modify"
+
+
 #' @import shiny
 app_server <- function(input, output,session) {
   
-  #Add synapse login
-  session$sendCustomMessage(type = "readCookie", message = list())
-  
-  ## Show message if user is not logged in to synapse
-  shiny::observeEvent(input$authorized, {
-    shiny::showModal(
-      shiny::modalDialog(
-        title = "Not logged in",
-        HTML("You must log in to <a href=\"https://www.synapse.org/\">Synapse</a> to use this application. Please log in, and then refresh this page.")
-      )
-    )
-  })
-  
   syn <- .GlobalEnv$synapseclient$Synapse()
   
-  shiny::observeEvent(input$cookie, {
-    
-    syn$login(sessionToken = input$cookie)
-    
-    output$title <- shiny::renderUI({
-      shiny::titlePanel(sprintf("Welcome, %s", syn$getUserProfile()$userName))
-    })
-    
-    require(magrittr)
-    require(rlang)
-    
-    app_config <- jsonlite::read_json("inst/app_config.json")
-    #data_config <- jsonlite::read_json("inst/data_config.json")
-    data_config <- jsonlite::read_json("inst/dev_data_config.json")
-    
-    data <- shiny::callModule(
-      mod_about_page_server, 
-      "about_page_ui_1", 
-      syn, 
-      data_config
-    )
-    
-    projectlive.modules::summary_snapshot_module_server(
-      id = "summary_snapshot_ui_1",
-      data = data,
-      config = shiny::reactive(
-        jsonlite::read_json("inst/summary_snapshot_module.json")
-      )
-    )
-    
-    projectlive.modules::publication_status_module_server(
-      id = "file_status_ui_1",
-      data = data,
-      config = shiny::reactive(
-        jsonlite::read_json("inst/publication_status_module.json")
-      )
-    )
-    
-    projectlive.modules::study_summary_module_server(
-      id = "study_summary_ui_1",
-      data = data,
-      config = shiny::reactive(
-        jsonlite::read_json("inst/study_summary_module.json")
-      )
-    )
-    
-    purrr::walk2(
-      list(
-        mod_new_submissions_server
-      ),
-      list(
-        "new_submissions_ui_1"
-      ),
-      shiny::callModule,
-      data,
-      app_config
-    ) 
+  if (interactive()) {
+    syn$login()
+  } else {
+    #pass
+  }
+
+  output$title <- shiny::renderUI({
+    shiny::titlePanel(sprintf("Welcome, %s", syn$getUserProfile()$userName))
   })
+  
+  require(magrittr)
+  require(rlang)
+  
+  app_config <- jsonlite::read_json("inst/app_config.json")
+  #data_config <- jsonlite::read_json("inst/data_config.json")
+  data_config <- jsonlite::read_json("inst/dev_data_config.json")
+  
+  data <- shiny::callModule(
+    mod_about_page_server, 
+    "about_page_ui_1", 
+    syn, 
+    data_config
+  )
+  
+  projectlive.modules::summary_snapshot_module_server(
+    id = "summary_snapshot_ui_1",
+    data = data,
+    config = shiny::reactive(
+      jsonlite::read_json("inst/summary_snapshot_module.json")
+    )
+  )
+  
+  projectlive.modules::publication_status_module_server(
+    id = "file_status_ui_1",
+    data = data,
+    config = shiny::reactive(
+      jsonlite::read_json("inst/publication_status_module.json")
+    )
+  )
+  
+  projectlive.modules::study_summary_module_server(
+    id = "study_summary_ui_1",
+    data = data,
+    config = shiny::reactive(
+      jsonlite::read_json("inst/study_summary_module.json")
+    )
+  )
+  
+  purrr::walk2(
+    list(
+      mod_new_submissions_server
+    ),
+    list(
+      "new_submissions_ui_1"
+    ),
+    shiny::callModule,
+    data,
+    app_config
+  ) 
+
 }
